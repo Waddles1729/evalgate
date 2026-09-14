@@ -1,0 +1,72 @@
+# Support assistant — regression suite.
+#
+# Run it with no API key at all:
+#   evalgate run -s examples/support-bot/evalgate.yaml
+#
+# Point `prompt` at v1.txt and re-run to watch the gate block a regression.
+name: support-bot
+
+dataset: dataset.jsonl
+prompt: prompts/v2.txt
+baseline: baseline.json
+
+# `fake` is a deterministic offline provider, so this example produces the same
+# numbers on every machine. Swap in a real one when you wire up your own suite:
+#   provider:
+#     name: openai
+#     model: gpt-4o-mini
+provider:
+  name: fake
+  model: fake-1
+
+judge:
+  name: fake-judge
+  model: fake-judge-1
+
+scorers:
+  # Cheap, deterministic, and carries most of the signal.
+  - name: policy
+    type: contains
+    weight: 2.0
+    threshold: 1.0
+    none_of:
+      - "I'd guess"
+      - "you would win"
+      - "probably nothing serious"
+
+  - name: closeness
+    type: similarity
+    weight: 1.0
+    threshold: 0.45
+
+  - name: brevity
+    type: length
+    weight: 0.5
+    threshold: 0.9
+    max_words: 60
+
+  # The judge only handles what the cheap scorers cannot.
+  - name: correctness
+    type: judge
+    weight: 2.0
+    threshold: 0.6
+    criteria: factual correctness against the reference answer
+
+  # Faithfulness is only meaningful where the answer is supposed to come from
+  # retrieved context. A policy refusal is correct precisely because it ignores
+  # the context, so scoring it here would measure the wrong thing.
+  - name: grounded
+    type: faithfulness
+    weight: 1.5
+    threshold: 0.6
+    skip_tags: [refusal, fallback]
+
+gate:
+  min_score: 0.60
+  max_regression: 0.02
+  fail_on_must_pass: true
+  fail_on_new_case_failure: true
+
+concurrency: 4
+cache_dir: .evalgate/cache
+report_dir: .evalgate/reports

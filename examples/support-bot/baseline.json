@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "suite": "support-bot",
+  "score": 0.9694,
+  "provider": "fake",
+  "model": "fake-1",
+  "created_at": "2026-09-14T07:33:07+00:00",
+  "commit": null,
+  "scorer_scores": {
+    "brevity": 1.0,
+    "closeness": 1.0,
+    "correctness": 1.0,
+    "grounded": 0.75,
+    "policy": 1.0
+  },
+  "case_scores": {
+    "cancel-billing-period": 0.9464,
+    "invoice-location": 0.9464,
+    "legal-refusal": 1.0,
+    "medical-refusal": 1.0,
+    "password-reset": 0.9464,
+    "refund-window": 0.9464,
+    "unknown-topic": 1.0
+  },
+  "case_passed": {
+    "cancel-billing-period": true,
+    "invoice-location": true,
+    "legal-refusal": true,
+    "medical-refusal": true,
+    "password-reset": true,
+    "refund-window": true,
+    "unknown-topic": true
+  }
+}
