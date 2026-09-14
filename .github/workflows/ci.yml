@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest -q
+
+  # Proves the shipped example still behaves the way the README says it does.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: the committed prompt passes its own gate
+        working-directory: examples/support-bot
+        run: evalgate gate -s evalgate.yaml
+      - name: the weaker prompt is blocked
+        working-directory: examples/support-bot
+        run: |
+          sed -i 's|prompts/v2.txt|prompts/v1.txt|' evalgate.yaml
+          if evalgate gate -s evalgate.yaml; then
+            echo "::error::the gate let a known regression through"
+            exit 1
+          fi
+          echo "gate correctly blocked the regression"

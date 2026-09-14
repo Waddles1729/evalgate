@@ -1,0 +1,124 @@
+name: evalgate
+description: Run an LLM evaluation suite and fail the build on a regression.
+branding:
+  icon: check-circle
+  color: purple
+
+inputs:
+  suite:
+    description: Path to the evalgate suite file.
+    required: false
+    default: evalgate.yaml
+  answer-fn:
+    description: "'module:function' that answers a case using your application."
+    required: false
+    default: ""
+  python-version:
+    description: Python version to run on.
+    required: false
+    default: "3.12"
+  comment:
+    description: Post the report as a pull request comment.
+    required: false
+    default: "false"
+  fail-on-regression:
+    description: Exit non-zero when the gate fails.
+    required: false
+    default: "true"
+
+outputs:
+  score:
+    description: Overall suite score.
+    value: ${{ steps.evaluate.outputs.score }}
+  passed:
+    description: Whether the gate passed.
+    value: ${{ steps.evaluate.outputs.passed }}
+  report:
+    description: Path to the Markdown report.
+    value: ${{ steps.evaluate.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install evalgate
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+
+    # Cached judge calls are what keep this affordable on every pull request.
+    - name: Restore the completion cache
+      uses: actions/cache@v4
+      with:
+        path: .evalgate/cache
+        key: evalgate-${{ hashFiles(inputs.suite) }}-${{ github.sha }}
+        restore-keys: evalgate-${{ hashFiles(inputs.suite) }}-
+
+    - id: evaluate
+      shell: bash
+      run: |
+        set +e
+        ARGS=(-s "${{ inputs.suite }}")
+        if [ -n "${{ inputs.answer-fn }}" ]; then
+          ARGS+=(--answer-fn "${{ inputs.answer-fn }}")
+        fi
+        evalgate run "${ARGS[@]}" --gate
+        STATUS=$?
+        set -e
+
+        REPORT_DIR=$(python -c "from evalgate.config import SuiteConfig; print(SuiteConfig.load('${{ inputs.suite }}').report_dir)")
+        echo "report=$REPORT_DIR/report.md" >> "$GITHUB_OUTPUT"
+
+        if [ -f "$REPORT_DIR/report.json" ]; then
+          python - "$REPORT_DIR/report.json" >> "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+        data = json.load(open(sys.argv[1]))
+        print(f"score={data['score']}")
+        print(f"passed={str(data['gate']['passed']).lower()}")
+        PY
+        fi
+
+        if [ -f "$REPORT_DIR/report.md" ]; then
+          cat "$REPORT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        if [ "${{ inputs.fail-on-regression }}" = "true" ]; then
+          exit $STATUS
+        fi
+
+    - name: Comment on the pull request
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' && always() }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const path = '${{ steps.evaluate.outputs.report }}';
+          if (!fs.existsSync(path)) return;
+          const body = fs.readFileSync(path, 'utf8');
+          const marker = '<!-- evalgate -->';
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body.includes(marker));
+
+          // Update in place so a busy PR does not accumulate one comment per push.
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body: marker + '\n' + body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: marker + '\n' + body,
+            });
+          }
